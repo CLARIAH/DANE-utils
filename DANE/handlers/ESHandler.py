@@ -30,14 +30,13 @@ import threading
 
 logger = logging.getLogger('DANE')
 
-INDEX = 'dane-index' # TODO make configurable?
-
 class ESHandler(handlers.base_handler):
 
     def __init__(self, config, queue=None):
         super().__init__(config)
 
         self.es = None
+        self.INDEX = self.config.ELASTICSEARCH.INDEX
         self.connect()
         self.queue = queue
         
@@ -61,8 +60,8 @@ class ESHandler(handlers.base_handler):
             logger.exception("ES Connection Failed")
             raise ConnectionError("ES Connection Failed")
 
-        if not self.es.indices.exists(index=INDEX):
-            self.es.indices.create(index=INDEX, body={
+        if not self.es.indices.exists(index=self.INDEX):
+            self.es.indices.create(index=self.INDEX, body={
                 "settings" : {
                     "index" : {
                         "number_of_shards" : self.config.ELASTICSEARCH.SHARDS, 
@@ -144,7 +143,7 @@ class ESHandler(handlers.base_handler):
                     ).encode('utf-8')).hexdigest()
 
         try:
-            res = self.es.index(index=INDEX, body=json.dumps(doc), 
+            res = self.es.index(index=self.INDEX, body=json.dumps(doc),
                     id=_id, refresh=True, op_type='create')
         except EX.ConflictError as e:
             raise DANE.errors.DocumentExistsError('A document with target.id `{}`, '\
@@ -165,7 +164,7 @@ class ESHandler(handlers.base_handler):
         for document in documents:
             doc = {}
             doc['_op_type'] = 'create'
-            doc['_index'] = INDEX
+            doc['_index'] = self.INDEX
 
             doc['_source'] = json.loads(document.to_json())
             doc['_source']['role'] = 'document'
@@ -268,9 +267,9 @@ class ESHandler(handlers.base_handler):
               }
               }
             }
-            self.es.delete_by_query(INDEX, body=query)
+            self.es.delete_by_query(self.INDEX, body=query)
 
-            self.es.delete(INDEX, document._id, refresh=True)
+            self.es.delete(self.INDEX, document._id, refresh=True)
             logger.debug("Deleted document #{}".format(document._id))
             return True
         except EX.NotFoundError as e:
@@ -279,7 +278,7 @@ class ESHandler(handlers.base_handler):
             return False
         
     def assignTask(self, task, document_id):
-        if not self.es.get(index=INDEX, id=document_id)['found']:
+        if not self.es.get(index=self.INDEX, id=document_id)['found']:
             raise DANE.errors.DocumentExistsError('No document with id `{}` found'.format(
                 document_id))
 
@@ -295,7 +294,7 @@ class ESHandler(handlers.base_handler):
             datetime.datetime.now().replace(microsecond=0).isoformat()
 
         try:
-            res = self.es.index(index=INDEX, 
+            res = self.es.index(index=self.INDEX,
                     routing=document_id,
                     body=json.dumps(t),
                     id=_id,
@@ -326,7 +325,7 @@ class ESHandler(handlers.base_handler):
                 "_source": "false" }))
 
         docs = []
-        for d, d_id in zip(self.es.msearch("\n".join(searches), index=INDEX)['responses'], document_ids):
+        for d, d_id in zip(self.es.msearch("\n".join(searches), index=self.INDEX)['responses'], document_ids):
             if d['hits']['total']['value'] == 1:
                 docs.append(d_id)
             elif d['hits']['total']['value'] == 0:
@@ -430,8 +429,8 @@ class ESHandler(handlers.base_handler):
                 } 
               }
             }
-            self.es.delete_by_query(INDEX, body=query)
-            self.es.delete(INDEX, task._id, refresh=True) 
+            self.es.delete_by_query(self.INDEX, body=query)
+            self.es.delete(self.INDEX, task._id, refresh=True)
             return True
         except EX.NotFoundError as e:
             return False
@@ -467,7 +466,7 @@ class ESHandler(handlers.base_handler):
           }
         }
 
-        result = self.es.search(index=INDEX, body=query)
+        result = self.es.search(index=self.INDEX, body=query)
 
         if result['hits']['total']['value'] == 1:
             # hacky way to pass _id to Task
@@ -494,7 +493,7 @@ class ESHandler(handlers.base_handler):
                 return
 
     def documentFromDocumentId(self, document_id):
-        result = self.es.get(index=INDEX, id=document_id, 
+        result = self.es.get(index=self.INDEX, id=document_id,
                 _source_excludes=['role'],
                 ignore=404)
 
@@ -529,7 +528,7 @@ class ESHandler(handlers.base_handler):
           }
         }
         
-        result = self.es.search(index=INDEX, body=query)
+        result = self.es.search(index=self.INDEX, body=query)
 
         if result['hits']['total']['value'] == 1:
             result['hits']['hits'][0]['_source']['_id'] = \
@@ -551,7 +550,7 @@ class ESHandler(handlers.base_handler):
         r['created_at'] = r['updated_at'] = \
             datetime.datetime.now().replace(microsecond=0).isoformat()
 
-        res = self.es.index(index=INDEX, 
+        res = self.es.index(index=self.INDEX,
                 routing=task_id,
                 body=json.dumps(r),
                 refresh=True)
@@ -564,7 +563,7 @@ class ESHandler(handlers.base_handler):
 
     def deleteResult(self, result):
         try:
-            self.es.delete(INDEX, result._id) 
+            self.es.delete(self.INDEX, result._id)
             return True
         except EX.NotFoundError as e:
             return False
@@ -599,7 +598,7 @@ class ESHandler(handlers.base_handler):
           }
         }
         
-        result = self.es.search(index=INDEX, body=query)
+        result = self.es.search(index=self.INDEX, body=query)
         
         if result['hits']['total']['value'] == 1:
             res = { '_id': result['hits']['hits'][0]['_id'] }
@@ -636,7 +635,7 @@ class ESHandler(handlers.base_handler):
           }
         }
         
-        result = self.es.search(index=INDEX, body=query)
+        result = self.es.search(index=self.INDEX, body=query)
         
         # if we found tasks then check all of them for the result
         if result['hits']['total']['value'] > 0:
@@ -667,7 +666,7 @@ class ESHandler(handlers.base_handler):
                 }
               }
             }
-            result = self.es.search(index=INDEX, body=query)
+            result = self.es.search(index=self.INDEX, body=query)
             
             if result['hits']['total']['value'] > 0:
                 found = []
@@ -778,7 +777,7 @@ class ESHandler(handlers.base_handler):
 
     def updateTaskState(self, task_id, state, message):        
 
-        self.es.update(index=INDEX, id=task_id, body={
+        self.es.update(index=self.INDEX, id=task_id, body={
             "doc": {
                 "task": {
                     "state": state,
@@ -813,7 +812,7 @@ class ESHandler(handlers.base_handler):
             }
         }
 
-        res = self.es.search(index=INDEX, body=query, size=perpage)
+        res = self.es.search(index=self.INDEX, body=query, size=perpage)
 
         ret = []
         for doc in res['hits']['hits']:
@@ -873,7 +872,7 @@ class ESHandler(handlers.base_handler):
                     "task.state": 102 # are queued
                   }}])
 
-        result = self.es.search(index=INDEX, body=query, size=1000)
+        result = self.es.search(index=self.INDEX, body=query, size=1000)
 
         if result['hits']['total']['value'] > 0:
             ret = []
@@ -918,7 +917,7 @@ class ESHandler(handlers.base_handler):
                   }
                 })
         
-        result = self.es.search(index=INDEX, body=query)
+        result = self.es.search(index=self.INDEX, body=query)
 
         if result['hits']['total']['value'] > 0:
             ret = []
